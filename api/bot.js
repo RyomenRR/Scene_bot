@@ -51,16 +51,34 @@ bot.command("list", async ctx => {
   let hasBuilds = false;
 
   for (const [scene, url] of Object.entries(SCENES)) {
-    const builds = await fetchBuilds(url);
+    let builds = [];
+    try {
+      builds = await fetchBuilds(url);
+    } catch (err) {
+      console.error(`Failed to fetch ${scene}:`, err);
+      reply += `\n📌 *${scene.toUpperCase()}* — ❌ Failed to fetch builds.\n`;
+      continue;
+    }
+
     if (builds.length) {
       hasBuilds = true;
       reply += `\n📌 *${scene.toUpperCase()}*\n`;
       builds.forEach(b => (reply += `  ├── ${b.name}\n`));
+    } else {
+      reply += `\n📌 *${scene.toUpperCase()}* — No builds found.\n`;
     }
   }
 
   if (!hasBuilds) reply = "No builds available at the moment.";
-  ctx.reply(reply, { parse_mode: "Markdown" });
+
+  // Telegram message limit safeguard
+  if (reply.length > 4000) reply = reply.slice(0, 3990) + "\n...and more";
+
+  try {
+    await ctx.reply(reply, { parse_mode: "Markdown" });
+  } catch (err) {
+    console.error("Telegram reply error:", err);
+  }
 });
 
 // /latest
