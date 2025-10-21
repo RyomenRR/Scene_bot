@@ -11,10 +11,6 @@ const bot = new Telegraf(BOT_TOKEN);
 
 // --- SCENE FOLDERS ---
 const SCENES = {
-  scene5: "http://download.omarea.com/scene5/",
-  scene6: "http://download.omarea.com/scene6/",
-  scene7: "http://download.omarea.com/scene7/",
-  scene8: "http://download.omarea.com/scene8/",
   scene9: "http://download.omarea.com/scene9/",
 };
 
