@@ -1,119 +1,51 @@
 import { Telegraf } from "telegraf";
-import fetch from "node-fetch";
 
-// --- BOT CONFIG ---
 const BOT_TOKEN = process.env.BOT_TOKEN;
-if (!BOT_TOKEN) {
-  throw new Error("BOT_TOKEN not set in environment variables!");
-}
+if (!BOT_TOKEN) throw new Error("BOT_TOKEN not set");
+
+const CHANNEL_ID = "@kachrapetihai";
+const FETCH_LIMIT = 100;
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// --- SCENE FOLDERS ---
-const SCENES = {
-  scene9: "http://download.omarea.com/scene9/",
-};
-
-// --- HELPER FUNCTION TO FETCH APK LINKS ---
-async function fetchBuilds(url) {
+// Helper: get APKs from channel
+async function getChannelApks(ctx) {
   try {
-    const res = await fetch(url);
-    const text = await res.text();
-    const regex = /href="(.*?\.apk)"/g;
-    const builds = [];
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      const link = match[1];
-      const name = decodeURIComponent(link.split("/").pop());
-      const fullUrl = link.startsWith("http") ? link : url + link;
-      builds.push({ name, url: fullUrl });
-    }
-    return builds;
+    const messages = await ctx.telegram.getChatHistory(CHANNEL_ID, { limit: FETCH_LIMIT });
+    return messages
+      .filter(msg => msg.document && msg.document.file_name.endsWith(".apk"))
+      .map(msg => ({ file_name: msg.document.file_name, message_id: msg.message_id }));
   } catch (err) {
-    console.error("Fetch error:", err);
+    console.error("Error fetching channel messages:", err);
     return [];
   }
 }
 
-// --- BOT COMMANDS ---
+// Listen for any text
+bot.on("text", async ctx => {
+  const text = ctx.message.text.toLowerCase().trim();
+  const apks = await getChannelApks(ctx);
 
-// /start
-bot.start(ctx => {
-  ctx.reply(
-    "👋 *Welcome to Scene Bot!*\nUse /list, /latest, or /download <keyword>.",
-    { parse_mode: "Markdown" }
-  );
-});
+  if (!apks.length) return ctx.reply("No APKs found in channel.");
 
-// /list - shows all APKs in scene9
-bot.command("list", async ctx => {
-  let reply = "*Available Builds in Scene 9:*\n";
+  // If user types '下载' or 'download', send latest
+  if (text === "下载" || text === "download") {
+    const latest = apks[apks.length - 1]; // last uploaded APK
+    await ctx.telegram.copyMessage(ctx.chat.id, CHANNEL_ID, latest.message_id);
+    return;
+  }
 
-  const url = SCENES.scene9;
-  const builds = await fetchBuilds(url);
-
-  if (builds.length === 0) {
-    reply += "\nNo builds found in Scene 9.";
+  // Otherwise, try to match by name (alpha3, beta2, etc)
+  const found = apks.find(a => a.file_name.toLowerCase().includes(text));
+  if (found) {
+    await ctx.telegram.copyMessage(ctx.chat.id, CHANNEL_ID, found.message_id);
   } else {
-    builds.forEach((b, idx) => {
-      reply += `\n${idx + 1}. ${b.name}`;
-    });
-  }
-
-  ctx.reply(reply, { parse_mode: "Markdown" });
-});
-
-// /latest - sends the latest APK in scene9
-bot.command("latest", async ctx => {
-  const builds = await fetchBuilds(SCENES.scene9);
-
-  if (builds.length === 0) {
-    return ctx.reply("No builds found in Scene 9.");
-  }
-
-  const sorted = builds.sort((a, b) => a.name.localeCompare(b.name));
-  const latest = sorted.at(-1);
-
-  try {
-    await ctx.replyWithDocument(
-      { url: latest.url, filename: latest.name },
-      { caption: `🆕 Latest Build:\n📦 ${latest.name}`, parse_mode: "Markdown" }
-    );
-  } catch (err) {
-    console.error("Failed to send latest APK:", err);
-    ctx.reply(`❌ Failed to send latest build: ${latest.name}`);
+    ctx.reply("No APK found matching: *" + text + "*", { parse_mode: "Markdown" });
   }
 });
 
-// /download <keyword> - sends APK matching keyword
-bot.command("download", async ctx => {
-  const text = ctx.message.text;
-  const parts = text.split(" ");
-  if (parts.length < 2) return ctx.reply("Usage: /download <keyword>");
-
-  const keyword = parts[1].toLowerCase();
-  const builds = await fetchBuilds(SCENES.scene9);
-  const foundBuild = builds.find(b => b.name.toLowerCase().includes(keyword));
-
-  if (foundBuild) {
-    try {
-      await ctx.replyWithDocument(
-        { url: foundBuild.url, filename: foundBuild.name },
-        { caption: `📦 ${foundBuild.name}`, parse_mode: "Markdown" }
-      );
-    } catch (err) {
-      console.error("Failed to send APK:", err);
-      ctx.reply(`❌ Failed to send ${foundBuild.name}.`);
-    }
-  } else {
-    ctx.reply(`No build found matching: *${keyword}*`, { parse_mode: "Markdown" });
-  }
-});
-
-// --- LAUNCH BOT ---
-bot.launch()
-  .then(() => console.log("✅ Scene Bot started!"))
-  .catch(err => console.error("Bot launch error:", err));
+// Start the bot
+bot.launch().then(() => console.log("✅ Scene Bot started!"));
 
 // Graceful stop
 process.once("SIGINT", () => bot.stop("SIGINT"));
