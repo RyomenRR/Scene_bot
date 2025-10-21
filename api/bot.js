@@ -38,96 +38,73 @@ async function fetchBuilds(url) {
 // --- BOT COMMANDS ---
 
 // /start
-bot.start(ctx =>
+bot.start(ctx => {
   ctx.reply(
     "👋 *Welcome to Scene Bot!*\nUse /list, /latest, or /download <keyword>.",
     { parse_mode: "Markdown" }
-  )
-);
+  );
+});
 
-// /list
+// /list - shows all APKs in scene9
 bot.command("list", async ctx => {
-  let reply = "*Available Builds:*\n";
-  let hasBuilds = false;
+  let reply = "*Available Builds in Scene 9:*\n";
 
-  for (const [scene, url] of Object.entries(SCENES)) {
-    let builds = [];
-    try {
-      builds = await fetchBuilds(url);
-    } catch (err) {
-      console.error(`Failed to fetch ${scene}:`, err);
-      reply += `\n📌 *${scene.toUpperCase()}* — ❌ Failed to fetch builds.\n`;
-      continue;
-    }
+  const url = SCENES.scene9;
+  const builds = await fetchBuilds(url);
 
-    if (builds.length) {
-      hasBuilds = true;
-      reply += `\n📌 *${scene.toUpperCase()}*\n`;
-      builds.forEach(b => (reply += `  ├── ${b.name}\n`));
-    } else {
-      reply += `\n📌 *${scene.toUpperCase()}* — No builds found.\n`;
-    }
+  if (builds.length === 0) {
+    reply += "\nNo builds found in Scene 9.";
+  } else {
+    builds.forEach((b, idx) => {
+      reply += `\n${idx + 1}. ${b.name}`;
+    });
   }
 
-  if (!hasBuilds) reply = "No builds available at the moment.";
+  ctx.reply(reply, { parse_mode: "Markdown" });
+});
 
-  // Telegram message limit safeguard
-  if (reply.length > 4000) reply = reply.slice(0, 3990) + "\n...and more";
+// /latest - sends the latest APK in scene9
+bot.command("latest", async ctx => {
+  const builds = await fetchBuilds(SCENES.scene9);
+
+  if (builds.length === 0) {
+    return ctx.reply("No builds found in Scene 9.");
+  }
+
+  const sorted = builds.sort((a, b) => a.name.localeCompare(b.name));
+  const latest = sorted.at(-1);
 
   try {
-    await ctx.reply(reply, { parse_mode: "Markdown" });
-  } catch (err) {
-    console.error("Telegram reply error:", err);
-  }
-});
-
-// /latest
-bot.command("latest", async ctx => {
-  let latest = null;
-
-  for (const url of Object.values(SCENES)) {
-    const builds = await fetchBuilds(url);
-    if (builds.length) {
-      const sorted = builds.sort((a, b) => a.name.localeCompare(b.name));
-      const currentLatest = sorted.at(-1);
-      if (!latest || currentLatest.name > latest.name) latest = currentLatest;
-    }
-  }
-
-  if (latest) {
-    ctx.reply(
-      `🆕 *Latest Build:*\n📦 ${latest.name}\n🔗 ${latest.url}`,
-      { parse_mode: "Markdown" }
+    await ctx.replyWithDocument(
+      { url: latest.url, filename: latest.name },
+      { caption: `🆕 Latest Build:\n📦 ${latest.name}`, parse_mode: "Markdown" }
     );
-  } else {
-    ctx.reply("No builds found.");
+  } catch (err) {
+    console.error("Failed to send latest APK:", err);
+    ctx.reply(`❌ Failed to send latest build: ${latest.name}`);
   }
 });
 
-// /download <keyword>
+// /download <keyword> - sends APK matching keyword
 bot.command("download", async ctx => {
   const text = ctx.message.text;
   const parts = text.split(" ");
   if (parts.length < 2) return ctx.reply("Usage: /download <keyword>");
 
   const keyword = parts[1].toLowerCase();
-  let foundBuild = null;
-
-  outer: for (const url of Object.values(SCENES)) {
-    const builds = await fetchBuilds(url);
-    for (const b of builds) {
-      if (b.name.toLowerCase().includes(keyword)) {
-        foundBuild = b;
-        break outer;
-      }
-    }
-  }
+  const builds = await fetchBuilds(SCENES.scene9);
+  const foundBuild = builds.find(b => b.name.toLowerCase().includes(keyword));
 
   if (foundBuild) {
-    ctx.reply(
-      `📦 ${foundBuild.name}\n🔗 ${foundBuild.url}`,
-      { parse_mode: "Markdown" }
-    );
+    try {
+      await ctx.replyWithDocument(
+        { url: foundBuild.url, filename: foundBuild.name },
+        { caption: `📦 ${foundBuild.name}`, parse_mode: "Markdown" }
+      );
+    } catch (err) {
+      console.error("Failed to send APK:", err);
+      ctx.reply(`❌ Failed to send ${foundBuild.name}.`);
+    }
   } else {
     ctx.reply(`No build found matching: *${keyword}*`, { parse_mode: "Markdown" });
   }
