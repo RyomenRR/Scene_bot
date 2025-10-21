@@ -1,87 +1,57 @@
-import { Telegraf } from "telegraf";
+from pyrogram import Client, filters
+import json
+import os
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHANNEL_ID = "@YourPrivateChannel"; // bot must be admin here
+# --- CONFIG ---
+API_ID = int(os.environ.get("API_ID"))   # from my.telegram.org
+API_HASH = os.environ.get("API_HASH")   # from my.telegram.org
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-if (!BOT_TOKEN) throw new Error("BOT_TOKEN not set!");
+# File storage
+APK_DB = "apks.json"
+if os.path.exists(APK_DB):
+    with open(APK_DB, "r") as f:
+        apk_db = json.load(f)
+else:
+    apk_db = {}  # { "Alpha3": "file_id", ... }
 
-const bot = new Telegraf(BOT_TOKEN);
+app = Client("scene_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-// In-memory storage of channel APKs
-let apkList = [];
+# --- Listen to messages in your groups and channels ---
+@app.on_message(filters.group | filters.channel | filters.private)
+async def handle_message(client, message):
+    global apk_db
 
-// --- HELPER: fetch messages from private channel ---
-async function fetchApkList() {
-  try {
-    let offset = 0;
-    let fetched = [];
-    while (true) {
-      const updates = await bot.telegram.getChatHistory(CHANNEL_ID, {
-        limit: 100,
-        offset: offset,
-      });
-      if (!updates || updates.length === 0) break;
+    # --- Store APKs if sent to private channel ---
+    if message.chat.username == "kachrapetihai" and message.document:
+        file_name = message.document.file_name
+        apk_db[file_name.lower()] = message.document.file_id
+        with open(APK_DB, "w") as f:
+            json.dump(apk_db, f)
+        return
 
-      updates.forEach((msg) => {
-        if (msg.document && msg.document.file_name.toLowerCase().endsWith(".apk")) {
-          fetched.push({
-            file_id: msg.document.file_id,
-            name: msg.document.file_name,
-          });
-        }
-      });
+    # --- Commands from users ---
+    text = message.text
+    if not text:
+        return
 
-      offset = updates[updates.length - 1].message_id + 1;
-    }
+    text_lower = text.lower().replace(" ", "").replace("-", "")
+    
+    # Check download / 下载 → send latest
+    if text_lower in ["download", "下载"]:
+        if not apk_db:
+            await message.reply("❌ No APKs found.")
+            return
+        # latest = last alphabetically
+        latest_name = sorted(apk_db.keys())[-1]
+        await client.send_document(message.chat.id, apk_db[latest_name])
+        return
 
-    // Sort alphabetically or by upload order
-    apkList = fetched.sort((a, b) => a.name.localeCompare(b.name));
-    console.log(`📦 Fetched ${apkList.length} APKs from channel.`);
-  } catch (err) {
-    console.error("Error fetching channel messages:", err);
-  }
-}
+    # Check for APK names
+    for name, file_id in apk_db.items():
+        name_clean = name.lower().replace(" ", "").replace("-", "")
+        if name_clean in text_lower:
+            await client.send_document(message.chat.id, file_id)
+            return
 
-// Fetch APKs once on startup
-fetchApkList();
-
-// --- LISTEN TO ALL MESSAGES ---
-bot.on("message", async (ctx) => {
-  const text = (ctx.message.text || "").toLowerCase().trim().replace(/\s+/g, "");
-
-  if (!text) return;
-
-  try {
-    // 1️⃣ download or 下载 → latest APK
-    if (text === "download" || text === "下载") {
-      if (apkList.length === 0) {
-        await ctx.reply("No APKs found in channel.");
-        return;
-      }
-      const latest = apkList[apkList.length - 1];
-      await ctx.telegram.sendDocument(ctx.chat.id, latest.file_id, {
-        caption: `📦 Latest APK: ${latest.name}`,
-      });
-      return;
-    }
-
-    // 2️⃣ check if message matches any APK name
-    const matched = apkList.find((apk) => apk.name.toLowerCase().replace(/\.apk$/, "").replace(/\s+/g, "").includes(text));
-    if (matched) {
-      await ctx.telegram.sendDocument(ctx.chat.id, matched.file_id, {
-        caption: `📦 ${matched.name}`,
-      });
-      return;
-    }
-  } catch (err) {
-    console.error("Error handling message:", err);
-  }
-});
-
-// --- LAUNCH BOT ---
-bot.launch()
-  .then(() => console.log("✅ Scene Bot started!"))
-  .catch((err) => console.error("Bot launch error:", err));
-
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+app.run()
