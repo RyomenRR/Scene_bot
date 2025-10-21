@@ -1,13 +1,10 @@
-// 1️⃣ CONFIG: Disable auto-parsing (we’ll manually parse the body)
-export const config = {
-  api: { bodyParser: false },
-};
-
+import { Telegraf } from "telegraf";
 import fetch from "node-fetch";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+const bot = new Telegraf(BOT_TOKEN);
 
+// Scene folders
 const SCENES = {
   scene5: "http://download.omarea.com/scene5/",
   scene6: "http://download.omarea.com/scene6/",
@@ -16,18 +13,7 @@ const SCENES = {
   scene9: "http://download.omarea.com/scene9/",
 };
 
-// Helper: read raw request body
-async function readBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
-
-// Helper: fetch builds from a scene URL
+// Fetch APK links
 async function fetchBuilds(url) {
   try {
     const res = await fetch(url);
@@ -35,6 +21,75 @@ async function fetchBuilds(url) {
     const regex = /href="(.*?\.apk)"/g;
     const builds = [];
     let match;
+    while ((match = regex.exec(text)) !== null) {
+      const link = match[1];
+      const name = decodeURIComponent(link.split("/").pop());
+      const fullUrl = link.startsWith("http") ? link : url + link;
+      builds.push({ name, url: fullUrl });
+    }
+    return builds;
+  } catch (err) {
+    console.error("Fetch error:", err);
+    return [];
+  }
+}
+
+// Telegram commands
+bot.start((ctx) =>
+  ctx.reply(
+    "👋 Welcome to Scene Bot!\nUse /list, /latest, or /download <keyword>."
+  )
+);
+
+bot.command("list", async (ctx) => {
+  let msg = "*Available Builds:*\n";
+  for (const [scene, url] of Object.entries(SCENES)) {
+    const builds = await fetchBuilds(url);
+    if (builds.length) {
+      msg += `\n📌 *${scene.toUpperCase()}*\n`;
+      builds.forEach((b) => (msg += `  ├── ${b.name}\n`));
+    }
+  }
+  ctx.reply(msg, { parse_mode: "Markdown" });
+});
+
+bot.command("latest", async (ctx) => {
+  let latest = null;
+  for (const url of Object.values(SCENES)) {
+    const builds = await fetchBuilds(url);
+    if (builds.length) {
+      const sorted = builds.sort((a, b) => a.name.localeCompare(b.name));
+      const currentLatest = sorted.at(-1);
+      if (!latest || currentLatest.name > latest.name) latest = currentLatest;
+    }
+  }
+  if (latest) {
+    ctx.reply(`🆕 *Latest Build:*\n📦 ${latest.name}\n🔗 ${latest.url}`, {
+      parse_mode: "Markdown",
+    });
+  } else ctx.reply("No builds found.");
+});
+
+bot.command("download", async (ctx) => {
+  const parts = ctx.message.text.split(" ");
+  if (parts.length < 2) return ctx.reply("Usage: /download <keyword>");
+  const keyword = parts[1].toLowerCase();
+  let found = null;
+  outer: for (const url of Object.values(SCENES)) {
+    const builds = await fetchBuilds(url);
+    for (const b of builds) {
+      if (b.name.toLowerCase().includes(keyword)) {
+        found = b;
+        break outer;
+      }
+    }
+  }
+  if (found) {
+    ctx.reply(`📦 ${found.name}\n🔗 ${found.url}`);
+  } else ctx.reply(`No build found matching: ${keyword}`);
+});
+
+bot.launch().then(() => console.log("Scene Bot started!"));    let match;
     while ((match = regex.exec(text)) !== null) {
       const link = match[1];
       const name = decodeURIComponent(link.split("/").pop());
