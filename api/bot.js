@@ -38,29 +38,35 @@ async function fetchBuilds(url) {
 // --- BOT COMMANDS ---
 
 // /start
-bot.start(ctx => {
+bot.start(ctx =>
   ctx.reply(
     "👋 *Welcome to Scene Bot!*\nUse /list, /latest, or /download <keyword>.",
     { parse_mode: "Markdown" }
-  );
-});
+  )
+);
 
 // /list
 bot.command("list", async ctx => {
   let reply = "*Available Builds:*\n";
+  let hasBuilds = false;
+
   for (const [scene, url] of Object.entries(SCENES)) {
     const builds = await fetchBuilds(url);
     if (builds.length) {
+      hasBuilds = true;
       reply += `\n📌 *${scene.toUpperCase()}*\n`;
       builds.forEach(b => (reply += `  ├── ${b.name}\n`));
     }
   }
+
+  if (!hasBuilds) reply = "No builds available at the moment.";
   ctx.reply(reply, { parse_mode: "Markdown" });
 });
 
 // /latest
 bot.command("latest", async ctx => {
   let latest = null;
+
   for (const url of Object.values(SCENES)) {
     const builds = await fetchBuilds(url);
     if (builds.length) {
