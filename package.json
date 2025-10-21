@@ -1,8 +1,11 @@
 {
-  "name": "omarea-bot",
+  "name": "scene-bot",
   "version": "1.0.0",
   "main": "api/bot.js",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "telegraf": "^4.15.0",
     "node-fetch": "^3.3.1"
