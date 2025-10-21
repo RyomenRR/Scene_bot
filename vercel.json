@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "api/bot.js": {
-      "runtime": "@vercel/nodejs@22"
+      "runtime": "@vercel/node@22"
     }
   }
 }
