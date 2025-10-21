@@ -1,95 +1,87 @@
 import { Telegraf } from "telegraf";
-import fs from "fs";
-import path from "path";
 
-// --- BOT CONFIG ---
 const BOT_TOKEN = process.env.BOT_TOKEN;
-if (!BOT_TOKEN) throw new Error("BOT_TOKEN not set in env!");
+const CHANNEL_ID = "@YourPrivateChannel"; // bot must be admin here
+
+if (!BOT_TOKEN) throw new Error("BOT_TOKEN not set!");
+
 const bot = new Telegraf(BOT_TOKEN);
 
-// --- APK DB STORAGE ---
-const DB_PATH = path.join(process.cwd(), "apkDB.json");
+// In-memory storage of channel APKs
+let apkList = [];
 
-// Load or initialize APK DB
-let apkDB = {};
-if (fs.existsSync(DB_PATH)) {
+// --- HELPER: fetch messages from private channel ---
+async function fetchApkList() {
   try {
-    apkDB = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
-  } catch {
-    apkDB = {};
-  }
-} else {
-  fs.writeFileSync(DB_PATH, JSON.stringify(apkDB, null, 2));
-}
-
-// Helper: Save DB
-function saveDB() {
-  fs.writeFileSync(DB_PATH, JSON.stringify(apkDB, null, 2));
-}
-
-// --- BOT LOGIC ---
-
-// Listen to all messages
-bot.on("message", async (ctx) => {
-  try {
-    const text = (ctx.message.text || "").toLowerCase();
-
-    // 1️⃣ If message is an APK upload to the bot itself
-    if (ctx.message.document && ctx.chat.type === "private") {
-      const doc = ctx.message.document;
-      const name = doc.file_name;
-      const file_id = doc.file_id;
-
-      // Save in DB
-      apkDB[name.toLowerCase()] = file_id;
-      saveDB();
-
-      return ctx.reply(`✅ APK saved: ${name}`);
-    }
-
-    // 2️⃣ Check triggers in groups
-    const triggerDownload = ["download", "下载"];
-    let sent = false;
-
-    // Match download/latest
-    if (triggerDownload.includes(text)) {
-      // Get latest APK by filename sorting
-      const apkNames = Object.keys(apkDB).sort();
-      if (apkNames.length === 0) return;
-
-      const latest = apkNames[apkNames.length - 1];
-      const file_id = apkDB[latest];
-
-      await ctx.telegram.sendDocument(ctx.chat.id, file_id, {
-        caption: `📦 Latest APK: ${latest}`,
+    let offset = 0;
+    let fetched = [];
+    while (true) {
+      const updates = await bot.telegram.getChatHistory(CHANNEL_ID, {
+        limit: 100,
+        offset: offset,
       });
-      sent = true;
-    } else {
-      // Match any APK keyword
-      for (const [name, file_id] of Object.entries(apkDB)) {
-        if (text.includes(name)) {
-          await ctx.telegram.sendDocument(ctx.chat.id, file_id, {
-            caption: `📦 ${name}`,
+      if (!updates || updates.length === 0) break;
+
+      updates.forEach((msg) => {
+        if (msg.document && msg.document.file_name.toLowerCase().endsWith(".apk")) {
+          fetched.push({
+            file_id: msg.document.file_id,
+            name: msg.document.file_name,
           });
-          sent = true;
-          break;
         }
+      });
+
+      offset = updates[updates.length - 1].message_id + 1;
+    }
+
+    // Sort alphabetically or by upload order
+    apkList = fetched.sort((a, b) => a.name.localeCompare(b.name));
+    console.log(`📦 Fetched ${apkList.length} APKs from channel.`);
+  } catch (err) {
+    console.error("Error fetching channel messages:", err);
+  }
+}
+
+// Fetch APKs once on startup
+fetchApkList();
+
+// --- LISTEN TO ALL MESSAGES ---
+bot.on("message", async (ctx) => {
+  const text = (ctx.message.text || "").toLowerCase().trim().replace(/\s+/g, "");
+
+  if (!text) return;
+
+  try {
+    // 1️⃣ download or 下载 → latest APK
+    if (text === "download" || text === "下载") {
+      if (apkList.length === 0) {
+        await ctx.reply("No APKs found in channel.");
+        return;
       }
+      const latest = apkList[apkList.length - 1];
+      await ctx.telegram.sendDocument(ctx.chat.id, latest.file_id, {
+        caption: `📦 Latest APK: ${latest.name}`,
+      });
+      return;
     }
 
-    // Optional: if not found
-    if (!sent && text.length > 0) {
-      // ctx.reply("❌ No matching APK found.");
+    // 2️⃣ check if message matches any APK name
+    const matched = apkList.find((apk) => apk.name.toLowerCase().replace(/\.apk$/, "").replace(/\s+/g, "").includes(text));
+    if (matched) {
+      await ctx.telegram.sendDocument(ctx.chat.id, matched.file_id, {
+        caption: `📦 ${matched.name}`,
+      });
+      return;
     }
-
   } catch (err) {
     console.error("Error handling message:", err);
   }
 });
 
 // --- LAUNCH BOT ---
-bot.launch().then(() => console.log("✅ Scene Bot started!"));
+bot.launch()
+  .then(() => console.log("✅ Scene Bot started!"))
+  .catch((err) => console.error("Bot launch error:", err));
 
-// Graceful shutdown
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
